@@ -4,10 +4,11 @@ import os
 import re
 import subprocess
 import time
-import thread
+import threading
 import sublime
 import sublime_plugin
 
+from .commands import *
 
 class Prefs:
     @staticmethod
@@ -26,7 +27,7 @@ Prefs.load()
 
 def debug_msg(msg):
     if Prefs.debug == 1:
-        print "[PHPUnit Plugin] " + msg
+        print("[PHPUnit Plugin] " + msg)
 
 
 # the AsyncProcess class has been cribbed from:
@@ -46,23 +47,29 @@ class AsyncProcess(object):
             # Popen works properly on OSX and Linux
             self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
         if self.proc.stdout:
-            thread.start_new_thread(self.read_stdout, ())
+            threading.Thread(target=self.read_stdout).start()
+
         if self.proc.stderr:
-            thread.start_new_thread(self.read_stderr, ())
+            threading.Thread(target=self.read_stderr).start()
+
 
     def read_stdout(self):
         while True:
-            data = os.read(self.proc.stdout.fileno(), 2 ** 15)
+            data = os.read(self.proc.stdout.fileno(), 2**15).decode('utf-8')
+
             if data != "":
                 sublime.set_timeout(functools.partial(self.listener.append_data, self.proc, data), 0)
             else:
-                self.proc.stdout.close()
+                self.proc.stderr.close()
                 self.listener.is_running = False
                 break
 
+
     def read_stderr(self):
+        print("read err")
         while True:
-            data = os.read(self.proc.stderr.fileno(), 2 ** 15)
+            data = os.read(self.proc.stderr.fileno(), 2 ** 15).decode('utf-8')
+
             if data != "":
                 sublime.set_timeout(functools.partial(self.listener.append_data, self.proc, data), 0)
             else:
@@ -71,15 +78,13 @@ class AsyncProcess(object):
                 self.listener.append_data(self.proc, "\n--- PROCESS COMPLETE ---")
                 break
 
-# the StatusProcess class has been cribbed from:
-# https://github.com/maltize/sublime-text-2-ruby-tests/blob/master/run_ruby_test.py
 
 
 class StatusProcess(object):
     def __init__(self, msg, listener):
         self.msg = msg
         self.listener = listener
-        thread.start_new_thread(self.run_thread, ())
+        threading.Thread(self.run_thread, ()).start()
 
     def run_thread(self):
         progress = ""
@@ -115,26 +120,18 @@ class OutputView(object):
     def clear_output_view(self):
         self.ensure_output_view()
         self.output_view.set_read_only(False)
-        edit = self.output_view.begin_edit()
-        self.output_view.erase(edit, sublime.Region(0, self.output_view.size()))
-        self.output_view.end_edit(edit)
+        self.output_view.run_command('erase_view')
         self.output_view.set_read_only(True)
 
     def append_data(self, proc, data):
-        str = data.decode("utf-8")
+        str = data
         str = str.replace('\r\n', '\n').replace('\r', '\n')
         str = re.sub('(.*)(\[2K|;\d+m)', '', str)
         str = re.sub('\[(\d+)m', '', str)
 
-        # selection_was_at_end = (len(self.output_view.sel()) == 1
-        #  and self.output_view.sel()[0]
-        #    == sublime.Region(self.output_view.size()))
         self.output_view.set_read_only(False)
-        edit = self.output_view.begin_edit()
-        self.output_view.insert(edit, self.output_view.size(), str)
-        #if selection_was_at_end:
+        self.output_view.run_command('insert_view', { 'string': str })
         self.output_view.show(self.output_view.size())
-        self.output_view.end_edit(edit)
         self.output_view.set_read_only(True)
 
 
@@ -652,7 +649,7 @@ class ActiveWindow(ActiveFile):
 
 class PhpunitTextBase(sublime_plugin.TextCommand, ActiveView):
     def run(self, args):
-        print 'Not implemented'
+        print('Not implemented')
 
     def toggle_active_group(self):
         # where will we open it?
@@ -973,7 +970,7 @@ class PhpunitFlushCacheCommand(PhpunitTextBase):
 
 class PhpunitWindowBase(sublime_plugin.WindowCommand, ActiveWindow):
     def run(self, paths=[]):
-        print "not implemented"
+        print("not implemented")
 
 
 class RunPhpunitOnXmlCommand(PhpunitWindowBase):
